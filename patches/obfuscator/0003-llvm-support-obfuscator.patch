@@ -1,0 +1,179 @@
+From 7be323c992741ac6e65c57ea92896640d803029e Mon Sep 17 00:00:00 2001
+From: heroims <heroims@163.com>
+Date: Mon, 8 Nov 2021 12:09:12 +0800
+Subject: [PATCH 3/4] llvm support obfuscator
+
+---
+ llvm/CMakeLists.txt                           |  4 +-
+ llvm/CODE_OWNERS.TXT                          |  4 ++
+ llvm/include/llvm/InitializePasses.h          |  1 +
+ llvm/lib/Transforms/CMakeLists.txt            |  1 +
+ llvm/lib/Transforms/IPO/CMakeLists.txt        |  1 +
+ .../lib/Transforms/IPO/PassManagerBuilder.cpp | 56 +++++++++++++++++++
+ 6 files changed, 65 insertions(+), 2 deletions(-)
+
+diff --git a/llvm/CMakeLists.txt b/llvm/CMakeLists.txt
+index 28ccef34d8..74182a0b09 100644
+--- a/llvm/CMakeLists.txt
++++ b/llvm/CMakeLists.txt
+@@ -207,9 +207,9 @@ include(VersionFromVCS)
+ option(LLVM_APPEND_VC_REV
+   "Embed the version control system revision in LLVM" ON)
+ 
+-set(PACKAGE_NAME LLVM)
++set(PACKAGE_NAME Obfuscator-LLVM)
+ set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
+-set(PACKAGE_BUGREPORT "https://bugs.llvm.org/")
++set(PACKAGE_BUGREPORT "https://heroims.github.io/")
+ 
+ set(BUG_REPORT_URL "${PACKAGE_BUGREPORT}" CACHE STRING
+   "Default URL where bug reports are to be submitted.")
+diff --git a/llvm/CODE_OWNERS.TXT b/llvm/CODE_OWNERS.TXT
+index 6fc7cf1cd3..ac9e71d78f 100644
+--- a/llvm/CODE_OWNERS.TXT
++++ b/llvm/CODE_OWNERS.TXT
+@@ -239,3 +239,7 @@ D: MinGW
+ N: Zi Xuan Wu (Zeson)
+ E: zixuan.wu@linux.alibaba.com
+ D: C-SKY backend (lib/Target/CSKY/*)
++
++N: Obfuscator-LLVM team
++E: heroims@163.com
++D: Obfuscator
+\ No newline at end of file
+diff --git a/llvm/include/llvm/InitializePasses.h b/llvm/include/llvm/InitializePasses.h
+index 4f89179a03..e9268af8e0 100644
+--- a/llvm/include/llvm/InitializePasses.h
++++ b/llvm/include/llvm/InitializePasses.h
+@@ -161,6 +161,7 @@ void initializeFinalizeMachineBundlesPass(PassRegistry&);
+ void initializeFixIrreduciblePass(PassRegistry &);
+ void initializeFixupStatepointCallerSavedPass(PassRegistry&);
+ void initializeFlattenCFGPassPass(PassRegistry&);
++void initializeFlatteningPass(PassRegistry&);
+ void initializeFloat2IntLegacyPassPass(PassRegistry&);
+ void initializeForceFunctionAttrsLegacyPassPass(PassRegistry&);
+ void initializeForwardControlFlowIntegrityPass(PassRegistry&);
+diff --git a/llvm/lib/Transforms/CMakeLists.txt b/llvm/lib/Transforms/CMakeLists.txt
+index 2a0abebdf1..615e21accb 100644
+--- a/llvm/lib/Transforms/CMakeLists.txt
++++ b/llvm/lib/Transforms/CMakeLists.txt
+@@ -10,3 +10,4 @@ add_subdirectory(HelloNew)
+ add_subdirectory(ObjCARC)
+ add_subdirectory(Coroutines)
+ add_subdirectory(CFGuard)
++add_subdirectory(Obfuscation)
+diff --git a/llvm/lib/Transforms/IPO/CMakeLists.txt b/llvm/lib/Transforms/IPO/CMakeLists.txt
+index 34788bc10f..131f55e56d 100644
+--- a/llvm/lib/Transforms/IPO/CMakeLists.txt
++++ b/llvm/lib/Transforms/IPO/CMakeLists.txt
+@@ -70,4 +70,5 @@ add_llvm_component_library(LLVMipo
+   TransformUtils
+   Vectorize
+   Instrumentation
++  Obfuscation
+   )
+diff --git a/llvm/lib/Transforms/IPO/PassManagerBuilder.cpp b/llvm/lib/Transforms/IPO/PassManagerBuilder.cpp
+index 068328391d..cdade7c48e 100644
+--- a/llvm/lib/Transforms/IPO/PassManagerBuilder.cpp
++++ b/llvm/lib/Transforms/IPO/PassManagerBuilder.cpp
+@@ -49,6 +49,13 @@
+ #include "llvm/Transforms/Vectorize/SLPVectorizer.h"
+ #include "llvm/Transforms/Vectorize/VectorCombine.h"
+ 
++#include "llvm/Transforms/Obfuscation/BogusControlFlow.h"
++#include "llvm/Transforms/Obfuscation/Flattening.h"
++#include "llvm/Transforms/Obfuscation/Split.h"
++#include "llvm/Transforms/Obfuscation/Substitution.h"
++#include "llvm/Transforms/Obfuscation/StringObfuscation.h"
++#include "llvm/Transforms/Obfuscation/CryptoUtils.h"
++
+ using namespace llvm;
+ 
+ cl::opt<bool> RunPartialInlining("enable-partial-inlining", cl::init(false),
+@@ -141,6 +148,28 @@ cl::opt<bool>
+     EnableGVNSink("enable-gvn-sink", cl::init(false), cl::ZeroOrMore,
+                   cl::desc("Enable the GVN sinking pass (default = off)"));
+ 
++// Flags for obfuscation
++static cl::opt<bool> Flattening("fla", cl::init(false),
++                                cl::desc("Enable the flattening pass"));
++
++static cl::opt<bool> BogusControlFlow("bcf", cl::init(false),
++                                      cl::desc("Enable bogus control flow"));
++
++static cl::opt<bool> Substitution("sub", cl::init(false),
++                                  cl::desc("Enable instruction substitutions"));
++
++static cl::opt<std::string> AesSeed("aesSeed", cl::init(""),
++                                    cl::desc("seed for the AES-CTR PRNG"));
++
++static cl::opt<bool> Split("split", cl::init(false),
++                           cl::desc("Enable basic block splitting"));
++
++static cl::opt<std::string> Seed("seed", cl::init(""),
++                           cl::desc("seed for the random"));
++
++static cl::opt<bool> StringObf("sobf", cl::init(false),
++                           cl::desc("Enable the string obfuscation"));
++
+ // This option is used in simplifying testing SampleFDO optimizations for
+ // profile loading.
+ cl::opt<bool>
+@@ -208,6 +237,21 @@ PassManagerBuilder::PassManagerBuilder() {
+     PerformThinLTO = EnablePerformThinLTO;
+     DivergentTarget = false;
+     CallGraphProfile = true;
++
++    // Initialization of the global cryptographically
++    // secure pseudo-random generator
++    if(!AesSeed.empty()) {
++        if(!llvm::cryptoutils->prng_seed(AesSeed.c_str())) {
++          exit(1);
++        }
++    }
++
++    //random generator
++    if(!Seed.empty()) {
++        if(!llvm::cryptoutils->prng_seed(Seed.c_str()))
++          exit(1);
++    }
++
+ }
+ 
+ PassManagerBuilder::~PassManagerBuilder() {
+@@ -534,6 +578,14 @@ void PassManagerBuilder::populateModulePassManager(
+   // Allow forcing function attributes as a debugging and tuning aid.
+   MPM.add(createForceFunctionAttrsLegacyPass());
+ 
++  MPM.add(createSplitBasicBlock(Split));
++  MPM.add(createBogus(BogusControlFlow));
++  #if LLVM_VERSION_MAJOR >= 9
++    MPM.add(createLowerSwitchPass());
++  #endif
++  MPM.add(createFlattening(Flattening));
++  MPM.add(createStringObfuscation(StringObf));
++
+   // If all optimizations are disabled, just run the always-inline pass and,
+   // if enabled, the function merging pass.
+   if (OptLevel == 0) {
+@@ -562,6 +614,8 @@ void PassManagerBuilder::populateModulePassManager(
+       MPM.add(createGlobalDCEPass());
+     }
+ 
++    MPM.add(createSubstitution(Substitution));
++
+     addExtensionsToPM(EP_EnabledOnOptLevel0, MPM);
+ 
+     if (PrepareForLTO || PrepareForThinLTO) {
+@@ -906,6 +960,8 @@ void PassManagerBuilder::populateModulePassManager(
+   // flattening of blocks.
+   MPM.add(createDivRemPairsPass());
+ 
++  MPM.add(createSubstitution(Substitution));
++
+   // LoopSink (and other loop passes since the last simplifyCFG) might have
+   // resulted in single-entry-single-exit or empty blocks. Clean up the CFG.
+   MPM.add(createCFGSimplificationPass());
+-- 
+2.34.1.windows.1
+

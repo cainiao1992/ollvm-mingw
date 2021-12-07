@@ -1,0 +1,365 @@
+From ffa094b1988f3496131b84c7bc3bee5aa38d617a Mon Sep 17 00:00:00 2001
+From: heroims <heroims@163.com>
+Date: Mon, 8 Nov 2021 12:08:43 +0800
+Subject: [PATCH 2/4] add obfuscation headers
+
+---
+ .../Transforms/Obfuscation/BogusControlFlow.h |  41 +++++
+ .../llvm/Transforms/Obfuscation/CryptoUtils.h | 145 ++++++++++++++++++
+ .../llvm/Transforms/Obfuscation/Flattening.h  |  32 ++++
+ .../llvm/Transforms/Obfuscation/Split.h       |  31 ++++
+ .../Obfuscation/StringObfuscation.h           |   6 +
+ .../Transforms/Obfuscation/Substitution.h     |  30 ++++
+ .../llvm/Transforms/Obfuscation/Utils.h       |  13 ++
+ 7 files changed, 298 insertions(+)
+ create mode 100644 llvm/include/llvm/Transforms/Obfuscation/BogusControlFlow.h
+ create mode 100644 llvm/include/llvm/Transforms/Obfuscation/CryptoUtils.h
+ create mode 100644 llvm/include/llvm/Transforms/Obfuscation/Flattening.h
+ create mode 100644 llvm/include/llvm/Transforms/Obfuscation/Split.h
+ create mode 100755 llvm/include/llvm/Transforms/Obfuscation/StringObfuscation.h
+ create mode 100644 llvm/include/llvm/Transforms/Obfuscation/Substitution.h
+ create mode 100644 llvm/include/llvm/Transforms/Obfuscation/Utils.h
+
+diff --git a/llvm/include/llvm/Transforms/Obfuscation/BogusControlFlow.h b/llvm/include/llvm/Transforms/Obfuscation/BogusControlFlow.h
+new file mode 100644
+index 0000000000..0e8c935de9
+--- /dev/null
++++ b/llvm/include/llvm/Transforms/Obfuscation/BogusControlFlow.h
+@@ -0,0 +1,41 @@
++//===- BogusControlFlow.h - bogus control flow obfuscation pass -----------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++//
++// This file contains includes and defines for the bogus control flow pass
++//
++//===----------------------------------------------------------------------===//
++#ifndef _OBFUSCATION_BOGUSCONTROLFLOW_H_
++#define _OBFUSCATION_BOGUSCONTROLFLOW_H_
++
++#include "llvm/ADT/Statistic.h"
++#include "llvm/CodeGen/ISDOpcodes.h"
++#include "llvm/IR/BasicBlock.h"
++#include "llvm/IR/Constants.h"
++#include "llvm/IR/Function.h"
++#include "llvm/IR/GlobalValue.h"
++#include "llvm/IR/InstrTypes.h"
++#include "llvm/IR/Instructions.h"
++#include "llvm/IR/LLVMContext.h"
++#include "llvm/IR/Module.h"
++#include "llvm/IR/Type.h"
++#include "llvm/Pass.h"
++#include "llvm/Support/CommandLine.h"
++#include "llvm/Support/Debug.h"
++#include "llvm/Support/raw_ostream.h"
++#include "llvm/Transforms/IPO.h"
++#include "llvm/Transforms/Obfuscation/CryptoUtils.h"
++#include "llvm/Transforms/Utils/BasicBlockUtils.h"
++#include "llvm/Transforms/Utils/Cloning.h"
++
++namespace llvm {
++Pass *createBogus();
++Pass *createBogus(bool flag);
++} // namespace llvm
++
++#endif
+diff --git a/llvm/include/llvm/Transforms/Obfuscation/CryptoUtils.h b/llvm/include/llvm/Transforms/Obfuscation/CryptoUtils.h
+new file mode 100644
+index 0000000000..1994ec002b
+--- /dev/null
++++ b/llvm/include/llvm/Transforms/Obfuscation/CryptoUtils.h
+@@ -0,0 +1,145 @@
++//===- CryptoUtils.h - Cryptographically Secure Pseudo-Random Generator ---===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++//
++// This file contains includes and defines for the AES CTR PRNG
++// The AES implementation has been derived and adapted
++// from libtomcrypt (see http://libtom.org)
++// Created on: 22 juin 2012
++// Author(s): jrinaldini, pjunod
++//===----------------------------------------------------------------------===//
++#ifndef _OBFUSCATION_CRYPTUTILS_H
++#define _OBFUSCATION_CRYPTUTILS_H
++
++#include "llvm/Support/ManagedStatic.h"
++
++#include <cstdint>
++#include <cstdio>
++#include <string>
++
++namespace llvm {
++
++class CryptoUtils;
++extern ManagedStatic<CryptoUtils> cryptoutils;
++
++#define BYTE(x, n) (((x) >> (8 * (n))) & 0xFF)
++
++#if defined(__i386) || defined(__i386__) || defined(_M_IX86) ||                \
++    defined(INTEL_CC) || defined(_WIN64) || defined(_WIN32)
++
++#ifndef ENDIAN_LITTLE
++#define ENDIAN_LITTLE
++#endif
++#define ENDIAN_32BITWORD
++
++#if !defined(_WIN64) || !defined(_WIN32)
++#ifndef UNALIGNED
++#define UNALIGNED
++#endif
++#endif
++
++#elif defined(__alpha)
++
++#ifndef ENDIAN_LITTLE
++#define ENDIAN_LITTLE
++#endif
++#define ENDIAN_64BITWORD
++
++#elif defined(__x86_64__)
++
++#ifndef ENDIAN_LITTLE
++#define ENDIAN_LITTLE
++#endif
++#define ENDIAN_64BITWORD
++#define UNALIGNED
++
++#elif (defined(__R5900) || defined(R5900) || defined(__R5900__)) &&            \
++    (defined(_mips) || defined(__mips__) || defined(mips))
++
++#ifndef ENDIAN_LITTLE
++#define ENDIAN_LITTLE
++#endif
++#define ENDIAN_64BITWORD
++
++#elif defined(__sparc)
++
++#ifndef ENDIAN_BIG
++#define ENDIAN_BIG
++#endif
++#if defined(__arch64__)
++#define ENDIAN_64BITWORD
++#else
++#define ENDIAN_32BITWORD
++#endif
++
++#endif
++
++#if defined(__BIG_ENDIAN__) || defined(_BIG_ENDIAN)
++#define ENDIAN_BIG
++#endif
++
++#if !defined(ENDIAN_BIG) && !defined(ENDIAN_LITTLE)
++#error                                                                         \
++    "Unknown endianness of the compilation platform, check this header aes_encrypt.h"
++#endif
++
++#define CryptoUtils_POOL_SIZE (0x1 << 17) // 2^17
++
++class CryptoUtils {
++public:
++  CryptoUtils();
++  ~CryptoUtils();
++
++  char *get_seed();
++  void get_bytes(char *buffer, const int len);
++  char get_char();
++  bool prng_seed(std::string const &seed);
++
++  // Returns a uniformly distributed 8-bit value
++  uint8_t get_uint8_t();
++  // Returns a uniformly distributed 32-bit value
++  uint32_t get_uint32_t();
++  // Returns an integer uniformly distributed on [0, max[
++  uint32_t get_range(const uint32_t max);
++  // Returns a uniformly distributed 64-bit value
++  uint64_t get_uint64_t();
++
++  // Scramble a 32-bit value depending on a 128-bit value
++  unsigned scramble32(const unsigned in, const char key[16]);
++
++  int sha256(const char *msg, unsigned char *hash);
++
++private:
++  uint32_t ks[44];
++  char key[16];
++  char ctr[16];
++  char pool[CryptoUtils_POOL_SIZE];
++  uint32_t idx;
++  std::string seed;
++  bool seeded;
++
++  typedef struct {
++    uint64_t length;
++    uint32_t state[8], curlen;
++    unsigned char buf[64];
++  } sha256_state;
++
++  void aes_compute_ks(uint32_t *ks, const char *k);
++  void aes_encrypt(char *out, const char *in, const uint32_t *ks);
++  bool prng_seed();
++  void inc_ctr();
++  void populate_pool();
++  int sha256_done(sha256_state *md, unsigned char *out);
++  int sha256_init(sha256_state *md);
++  static int sha256_compress(sha256_state *md, unsigned char *buf);
++  int sha256_process(sha256_state *md, const unsigned char *in,
++                     unsigned long inlen);
++};
++} // namespace llvm
++
++#endif
+diff --git a/llvm/include/llvm/Transforms/Obfuscation/Flattening.h b/llvm/include/llvm/Transforms/Obfuscation/Flattening.h
+new file mode 100644
+index 0000000000..fd647a0517
+--- /dev/null
++++ b/llvm/include/llvm/Transforms/Obfuscation/Flattening.h
+@@ -0,0 +1,32 @@
++//===- FlatteningIncludes.h - Flattening Obfuscation pass------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++//
++// This file contains includes and defines for the flattening pass
++//
++//===----------------------------------------------------------------------===//
++
++#ifndef _OBFUSCATION_FLATTENING_H_
++#define _OBFUSCATION_FLATTENING_H_
++
++#include "llvm/ADT/Statistic.h"
++#include "llvm/IR/Function.h"
++#include "llvm/IR/Module.h"
++#include "llvm/Pass.h"
++#include "llvm/Support/CommandLine.h"
++#include "llvm/Transforms/IPO.h"
++#include "llvm/Transforms/Obfuscation/CryptoUtils.h"
++#include "llvm/Transforms/Obfuscation/Utils.h"
++#include "llvm/Transforms/Scalar.h"
++#include "llvm/Transforms/Utils/Local.h" // For DemoteRegToStack and DemotePHIToStack
++
++namespace llvm {
++Pass *createFlattening(bool flag);
++} // namespace llvm
++
++#endif
+diff --git a/llvm/include/llvm/Transforms/Obfuscation/Split.h b/llvm/include/llvm/Transforms/Obfuscation/Split.h
+new file mode 100644
+index 0000000000..6b0c56ca12
+--- /dev/null
++++ b/llvm/include/llvm/Transforms/Obfuscation/Split.h
+@@ -0,0 +1,31 @@
++//===- FlatteningIncludes.h - Flattening Obfuscation pass------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++//
++// This file contains includes and defines for the split basicblock pass
++//
++//===----------------------------------------------------------------------===//
++#ifndef _OBFUSCATION_SPLIT_H_
++#define _OBFUSCATION_SPLIT_H_
++
++#include "llvm/ADT/Statistic.h"
++#include "llvm/IR/BasicBlock.h"
++#include "llvm/IR/Module.h"
++#include "llvm/Pass.h"
++#include "llvm/Support/CommandLine.h"
++#include "llvm/Transforms/IPO.h"
++#include "llvm/Transforms/Obfuscation/CryptoUtils.h"
++#include "llvm/Transforms/Obfuscation/Utils.h"
++#include "llvm/Transforms/Scalar.h"
++#include "llvm/Transforms/Utils/Local.h" // For DemoteRegToStack and DemotePHIToStack
++
++namespace llvm {
++Pass *createSplitBasicBlock(bool flag);
++}
++
++#endif
+diff --git a/llvm/include/llvm/Transforms/Obfuscation/StringObfuscation.h b/llvm/include/llvm/Transforms/Obfuscation/StringObfuscation.h
+new file mode 100755
+index 0000000000..b902332b9e
+--- /dev/null
++++ b/llvm/include/llvm/Transforms/Obfuscation/StringObfuscation.h
+@@ -0,0 +1,6 @@
++// LLVM include
++#include "llvm/Pass.h"
++
++namespace llvm {
++      Pass* createStringObfuscation(bool flag);
++}
+diff --git a/llvm/include/llvm/Transforms/Obfuscation/Substitution.h b/llvm/include/llvm/Transforms/Obfuscation/Substitution.h
+new file mode 100644
+index 0000000000..1b524c26b2
+--- /dev/null
++++ b/llvm/include/llvm/Transforms/Obfuscation/Substitution.h
+@@ -0,0 +1,30 @@
++//===- SubstitutionIncludes.h - Substitution Obfuscation ------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++//
++// This file contains includes and defines for the substitution pass
++//
++//===----------------------------------------------------------------------===//
++
++#ifndef _OBFUSCATION_SUBSTITUTIONS_H_
++#define _OBFUSCATION_SUBSTITUTIONS_H_
++
++#include "llvm/ADT/Statistic.h"
++#include "llvm/IR/Function.h"
++#include "llvm/IR/Instructions.h"
++#include "llvm/IR/Module.h"
++#include "llvm/Pass.h"
++#include "llvm/Support/CommandLine.h"
++#include "llvm/Transforms/IPO.h"
++#include "llvm/Transforms/Obfuscation/CryptoUtils.h"
++
++namespace llvm {
++Pass *createSubstitution(bool flag);
++} // namespace llvm
++
++#endif
+diff --git a/llvm/include/llvm/Transforms/Obfuscation/Utils.h b/llvm/include/llvm/Transforms/Obfuscation/Utils.h
+new file mode 100644
+index 0000000000..12c7f4e3d8
+--- /dev/null
++++ b/llvm/include/llvm/Transforms/Obfuscation/Utils.h
+@@ -0,0 +1,13 @@
++#ifndef _OBFUSCATION_UTILS_H_
++#define _OBFUSCATION_UTILS_H_
++
++#include "llvm/IR/Function.h"
++#include "llvm/IR/Instructions.h"
++#include "llvm/Transforms/Utils/Local.h" // For DemoteRegToStack and DemotePHIToStack
++#include <string>
++
++void fixStack(llvm::Function *f);
++std::string readAnnotate(llvm::Function *f);
++bool toObfuscate(bool flag, llvm::Function *f, std::string const &attribute);
++
++#endif
+-- 
+2.34.1.windows.1
+
