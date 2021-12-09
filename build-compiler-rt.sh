@@ -50,13 +50,22 @@ fi
 # Add a symlink for i386 -> i686; we normally name the toolchain
 # i686-w64-mingw32, but due to the compiler-rt cmake peculiarities, we
 # need to refer to it as i386 at this stage.
-if [ ! -e "$PREFIX/i386-w64-mingw32" ]; then
-    case $ARCHS in
-    *i686*)
+case $ARCHS in
+*i686*)
+    if [ ! -e "$PREFIX/i386-w64-mingw32" ]; then
         ln -sfn i686-w64-mingw32 "$PREFIX/i386-w64-mingw32" || true
-        ;;
-    esac
-fi
+    else
+        case $(uname) in
+        MINGW*|MSYS*) 
+            # The default implementation of msys2 symbolic links is to copying the files.
+            # https://github.com/msys2/MSYS2-packages/issues/249
+            rm -rf "$PREFIX/i386-w64-mingw32"
+            cp -rf "$PREFIX/i686-w64-mingw32" "$PREFIX/i386-w64-mingw32"
+            ;;
+        esac
+    fi
+    ;;
+esac
 
 if [ -n "$(which ninja)" ]; then
     CMAKE_GENERATOR="Ninja"
