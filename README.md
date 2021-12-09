@@ -5,39 +5,49 @@ This is Obfuscator-LLVM based mingw-w64 toolchain.
 Obfuscator-LLVM MinGW is the new patch set based on [@heroims](https://github.com/heroims
 ) Obfuscator-LLVM and the project development of [LLVM MinGW](https://github.com/mstorsjo/llvm-mingw)
 
-## How to use it
+## Usage
 
-The simplest way to use Obfuscator-LLVM, is to pass a flag to the LLVM backend from Clang. The current available flags are :
-
-1. `-fla` for the [[control flow flattening|Control Flow Flattening]] pass
-2. `-sub` for the [[instruction substitution|Instructions Substitution]] pass
-3. `-bcf` for the [[bogus control flow|Bogus Control Flow]] pass
-
-For annotations, see [[Functions annotations|Functions annotations]].
-
-Imagine that you have a code file named `test.c` and that you want to use the substitution pass; just call `clang` like that :
+Add option for opening string obfuscation when compiling.
 ```
-$ path_to_the/build/bin/clang test.c -o test -mllvm -sub
-```
-Of course, you can call more than one pass at a time (e.g flattening and substitutions) : 
-```
-$ path_to_the/build/bin/clang test.c -o test -mllvm -sub -mllvm -fla
+-mllvm -sobf
 ```
 
-If you have a project using the 'autotools' and you want to compile it with obfuscation, you can do that :
+Add option for opening control flow flattening when compiling.
 ```
-$ CC=path_to_the/build/bin/clang
-$ CFLAGS+="-mllvm -fla" or CXXFLAGS+="-mllvm -fla" (or any other obfuscation-related flags)
-$ ./configure
-$ make
+-mllvm -fla
 ```
-[here.](https://github.com/obfuscator-llvm/obfuscator/wiki/Installation#how-to-use-it)
 
+Add option for opening instruction substitutions when compiling.
+```
+-mllvm -sub
+```
+
+Add option for opening bogus control flow when compiling.
+```
+-mllvm -bcf
+```
+
+Add option for setting random seed.
+```
+-mllvm -seed=0xdeadbeaf
+```
+
+eg.
+```
+i686-w64-mingw32-clang hello.c -o hello86.exe -mllvm -sub -mllvm -fla -mllvm -bcf -mllvm -sobf
+
+x86_64-w64-mingw32-clang hello.c -o hello64.exe -mllvm -sub -mllvm -fla -mllvm -bcf -mllvm -sobf
+```
+
+
+[obfuscator-llvm here](https://github.com/obfuscator-llvm/obfuscator/wiki/Installation#how-to-use-it)
+[Armariris here](https://github.com/GoSSIP-SJTU/Armariris#usage)
 
 ## Thanks and References
 - https://github.com/mstorsjo/llvm-mingw
 - https://github.com/heroims/obfuscator
 - https://github.com/obfuscator-llvm/obfuscator
+- https://github.com/GoSSIP-SJTU/Armariris
 - https://llvm.org
 - https://www.mingw-w64.org
 
